@@ -17,11 +17,127 @@
 #define TASK_NAME_SZ 60               /* maximum size for a task's name */
 #define SHELL_EXECUTABLE_NAME "shell" /* executable for shell */
 
+/* Define Linked List Structure & functions */
+typedef struct node {
+  int id;
+  pid_t pid;
+  char* name;
+  struct node* next;
+  struct node* prev;
+} node;
+
+node* newNode(int id, pid_t pid, char* name) {
+  node* Node = (node*) malloc(sizeof(node));
+  Node->id = id;
+  Node->pid = pid;
+  // Copy name to the struct
+  Node->name = (char*) malloc(sizeof(char) * TASK_NAME_SZ);
+  strcpy(Node->name, name);
+  return Node;
+}
+
+node* addNode(node* list, pid_t pid, char* name) {
+  node* head = list;
+  if (head == NULL) {
+    head = newNode(0, pid, name);
+    head->next = head;
+    head->prev = head;
+  } else {
+    while (list->next != head) {
+      list = list->next;
+    }
+    list->next = newNode(list->id + 1, pid, name);
+    list->next->next = head;
+    list->next->prev = list;
+    head->prev = list->next;
+  }
+  return head;
+}
+
+void printList(node* list) {
+  node* head = list;
+  do {
+    printf("id: %d\tpid: %d\tname: %s\n", list->id, list->pid, list->name);
+    list = list->next;
+  } while (list != head);
+  printf("\n");
+}
+
+node* deleteNode(node* list, pid_t pid, int id) {
+  // Search by pid
+  node* head = list;
+  if (id == -1) {
+    if (list->pid == pid) {
+      list->next->prev = head->prev;
+      head->prev->next = list->next;
+      head = list->next;
+      free(list);
+      return head;
+    }
+    list = list->next;
+    while (list != head) {
+      if (list->pid == pid) {
+        list->prev->next = list->next;
+        list->next->prev = list->prev;
+        free(list);
+        break;
+      }
+      list = list->next;
+    }
+  } else {
+    // Search by id
+    if (list->id == id) {
+      list->next->prev = head->prev;
+      head->prev->next = list->next;
+      head = list->next;
+      free(list);
+      return head;
+    }
+    list = list->next;
+    while (list != head) {
+      if (list->id == id) {
+        list->prev->next = list->next;
+        list->next->prev = list->prev;
+        free(list);
+        break;
+      }
+      list = list->next;
+    }
+  }
+  return head;
+}
+
+node* accessNode(node* list, pid_t pid, int id) {
+  node* head = list;
+  if (id == -1 && pid >= 0) {
+    do {
+      if (list->pid == pid) {
+        return list;
+      }
+      list = list->next;
+    } while (list != head);
+    printf("Error: The node with pid: %d, doesn't exist!\n", pid);
+  } else {
+    do {
+      if (list->id == id) {
+        return list;
+      }
+      list = list->next;
+    } while (list != head);
+    printf("Error: The node with id: %d, doesn't exist!\n", id);
+  }
+  return NULL;
+}
+
+// Define ProcList
+node* proc_list = NULL;
+volatile int nproc = 0;
+
 /* Print a list of all tasks currently being scheduled.  */
 static void
 sched_print_tasks(void)
 {
-	assert(0 && "Please fill me!");
+	printList(proc_list);
 }
 
 /* Send SIGKILL to a task determined by the value of its
@@ -30,8 +146,12 @@ sched_print_tasks(void)
 static int
 sched_kill_task_by_id(int id)
 {
-	assert(0 && "Please fill me!");
-	return -ENOSYS;
+  node* stopped = accessNode(proc_list, -1, id);
+  if (stopped != NULL) {
+    kill(stopped->pid, SIGKILL);
+    return id;
+  }
+  return 0;
 }
 
 
@@ -39,7 +159,25 @@ sched_kill_task_by_id(int id)
 static void
 sched_create_task(char *executable)
 {
-	assert(0 && "Please fill me!");
+	pid_t pid = fork();
+	if (pid < 0) {
+		// Error code
+		perror("fork");
+	} else if (pid == 0) {
+		// Child process code
+		free(proc_list);
+		char *newargv[] = { executable, NULL, NULL, NULL };
+		char *newenviron[] = { NULL };
+		raise(SIGSTOP);
+		execve(executable, newargv, newenviron);
+		// Unreachable point. Execve only returns on error.
+		perror("execve");
+		exit(1);
+	} else {
+		// Parent Code
+		proc_list = addNode(proc_list, pid, executable);
+		nproc++;  /* number of proccesses goes here */
+	}
 }
 
 /* Process requests by the shell.  */
@@ -63,22 +201,49 @@ process_request(struct request_struct *rq)
 	}
 }
 
-/* 
+/*
  * SIGALRM handler
  */
 static void
 sigalrm_handler(int signum)
 {
-	assert(0 && "Please fill me!");
+	kill(proc_list->pid, SIGSTOP);
+  alarm(SCHED_TQ_SEC);
 }
 
-/* 
+/*
  * SIGCHLD handler
  */
 static void
 sigchld_handler(int signum)
 {
-	assert(0 && "Please fill me!");
+	signal(SIGALRM, SIG_IGN);
+  int status;
+  for (;;) {
+    pid_t pid = waitpid(-1, &status, WUNTRACED | WNOHANG);
+    if (pid < 0) {
+      perror("waitpid");
+      exit(1);
+    }
+    if (pid == 0) break;
+
+    //explain_wait_status(pid, status);
+
+    if (WIFEXITED(status) || WIFSIGNALED(status)) {
+      /* A child has died */
+      node* stopped = accessNode(proc_list, pid, -1);
+      kill(stopped->next->pid, SIGCONT);
+      alarm(SCHED_TQ_SEC);
+      proc_list = deleteNode(proc_list, pid, -1);
+      nproc--;
+    }
+    if (WIFSTOPPED(status)) {
+      /* A child has stopped due to SIGSTOP/SIGTSTP, etc... */
+      proc_list = proc_list->next;
+      kill(proc_list->pid, SIGCONT);
+    }
+  }
+  signal(SIGALRM, sigalrm_handler);
 }
 
 /* Disable delivery of SIGALRM and SIGCHLD. */
@@ -176,7 +341,7 @@ do_shell(char *executable, int wfd, int rfd)
  * two pipes are created for communication and passed
  * as command-line arguments to the executable.
  */
-static void
+static pid_t
 sched_create_shell(char *executable, int *request_fd, int *return_fd)
 {
 	pid_t p;
@@ -205,6 +370,7 @@ sched_create_shell(char *executable, int *request_fd, int *return_fd)
 	close(pfds_ret[0]);
 	*request_fd = pfds_rq[0];
 	*return_fd = pfds_ret[1];
+  return p;
 }
 
 static void
@@ -237,39 +403,53 @@ shell_request_loop(int request_fd, int return_fd)
 
 int main(int argc, char *argv[])
 {
-	int nproc;
 	/* Two file descriptors for communication with the shell */
 	static int request_fd, return_fd;
 
 	/* Create the shell. */
-	sched_create_shell(SHELL_EXECUTABLE_NAME, &request_fd, &return_fd);
+	pid_t shell_pid = sched_create_shell(SHELL_EXECUTABLE_NAME, &request_fd, &return_fd);
+  proc_list = addNode(proc_list, shell_pid, SHELL_EXECUTABLE_NAME);
+	nproc++;
+
 	/* TODO: add the shell to the scheduler's tasks */
 
 	/*
 	 * For each of argv[1] to argv[argc - 1],
 	 * create a new child process, add it to the process list.
 	 */
-
-	nproc = 0; /* number of proccesses goes here */
-
-	/* Wait for all children to raise SIGSTOP before exec()ing. */
-	wait_for_ready_children(nproc);
-
-	/* Install SIGALRM and SIGCHLD handlers. */
-	install_signal_handlers();
+	int i;
+	for (i = 0; i < argc - 1; i++) {
+		sched_create_task(argv[i+1]);
+  }
 
 	if (nproc == 0) {
 		fprintf(stderr, "Scheduler: No tasks. Exiting...\n");
 		exit(1);
 	}
 
+	/* Wait for all children to raise SIGSTOP before exec()ing. */
+	wait_for_ready_children(nproc);
+
+	/* Install SIGALRM and SIGCHLD handlers. */
+	install_signal_handlers();
+	// Start the first process and set alarm
+	kill(proc_list->pid, SIGCONT);
+  alarm(SCHED_TQ_SEC);
+
+
 	shell_request_loop(request_fd, return_fd);
 
 	/* Now that the shell is gone, just loop forever
 	 * until we exit from inside a signal handler.
 	 */
-	while (pause())
-		;
+	 while (1) {
+     if (pause() == -1) {
+       if (nproc == 0) {
+         printf("No processes on the list. Exiting...");
+         exit(0);
+       }
+     }
+   }
 
 	/* Unreachable */
 	fprintf(stderr, "Internal error: Reached unreachable point\n");
