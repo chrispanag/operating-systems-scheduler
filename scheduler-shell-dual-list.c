@@ -22,21 +22,14 @@ typedef struct node {
   int id;
   pid_t pid;
   char* name;
-  int priority; /* 0 for LOW, 1 for HIGH */
   struct node* next;
   struct node* prev;
 } node;
-
-// Define ProcList
-node* proc_list = NULL;
-node* proc_list_high = NULL;
-volatile int nproc = 0;
 
 node* newNode(int id, pid_t pid, char* name) {
   node* Node = (node*) malloc(sizeof(node));
   Node->id = id;
   Node->pid = pid;
-  Node->priority = 0; // All processes are initiated with LOW priority.
   // Copy name to the struct
   Node->name = (char*) malloc(sizeof(char) * TASK_NAME_SZ);
   strcpy(Node->name, name);
@@ -62,23 +55,14 @@ node* addNode(node* list, pid_t pid, char* name) {
 }
 
 void printList(node* list) {
-  node* head = list;
-  char priority[5];
-  do {
-    if (list->priority) {
-      strcpy(priority, "HIGH");
-    } else {
-      strcpy(priority, "LOW");
-    }
-    printf("id: %d\tpid: %d\tname: %s\tpriority: %s\n", list->id, list->pid, list->name, priority);
-    list = list->next;
-  } while (list != head);
+  if (list != NULL) {
+    node* head = list;
+    do {
+      printf("id: %d\tpid: %d\tname: %s\n", list->id, list->pid, list->name);
+      list = list->next;
+    } while (list != head);
+  }
   printf("\n");
-}
-
-void disconnectNode(node* Node) {
-  Node->prev->next = Node->next;
-  Node->next->prev = Node->prev;
 }
 
 node* deleteNode(node* list, pid_t pid, int id) {
@@ -86,7 +70,8 @@ node* deleteNode(node* list, pid_t pid, int id) {
   node* head = list;
   if (id == -1) {
     if (list->pid == pid) {
-      disconnectNode(list);
+      list->next->prev = head->prev;
+      head->prev->next = list->next;
       head = list->next;
       free(list);
       return head;
@@ -94,7 +79,8 @@ node* deleteNode(node* list, pid_t pid, int id) {
     list = list->next;
     while (list != head) {
       if (list->pid == pid) {
-        disconnectNode(list);
+        list->prev->next = list->next;
+        list->next->prev = list->prev;
         free(list);
         break;
       }
@@ -140,87 +126,54 @@ node* accessNode(node* list, pid_t pid, int id) {
       }
       list = list->next;
     } while (list != head);
-    printf("Error: The node with id: %d, doesn't exist!\n", id);
   }
   return NULL;
 }
 
-node* getNextProcess(node* this, int terminated) {
-  // if priority == 0 and there are other processes with HIGH
-  if (!this->next->priority && proc_list_high != NULL) {
-    if (terminated && proc_list_high == this) return this->next;
-    else return proc_list_high;
-  }
-  return this->next;
-}
-
-static void sched_set_priority_high(int id) {
-  node* this = accessNode(proc_list, -1, id);
-  if (this != NULL) {
-    disconnectNode(this);
-    this->priority = 1;
-    node* list = proc_list;
-    // Search until u find the last zero
-    while ((list->prev != proc_list) && (list->prev->priority == 0)) {
-      list = list->prev;
-    }
-    this->prev = list->prev;
-    this->next = list;
-    list->prev->next = this;
-    list->prev = this;
-    if (proc_list_high == NULL) proc_list_high = this;
-  }
-}
-
-static void sched_set_priority_low(int id) {
-  node* this = accessNode(proc_list, -1, id);
-  if (this != NULL) {
-    this->priority = 0;
-
-    node* list = proc_list_high;
-    disconnectNode(this);
-    this->prev = list->prev;
-    this->next = list;
-    list->prev->next = this;
-    list->prev = this;
-
-    // If we demoted the proc_list_high index we need to change it
-    if (proc_list_high == this) {
-      if (proc_list_high->next->priority) {
-        proc_list_high = proc_list_high->next;
-      } else {
-        proc_list_high = NULL;
-      }
-    }
-  }
-}
+// Define ProcList
+node* proc_list_high = NULL;
+node* proc_list_low = NULL;
+volatile int nproc = 0;
 
 /* Print a list of all tasks currently being scheduled.  */
-static void sched_print_tasks(void) {
-	printList(proc_list);
+static void
+sched_print_tasks(void)
+{
+  printf("High:\n");
+	printList(proc_list_high);
+  printf("Low:\n");
+  printList(proc_list_low);
 }
 
 /* Send SIGKILL to a task determined by the value of its
  * scheduler-specific id.
  */
-static int sched_kill_task_by_id(int id) {
-  node* stopped = accessNode(proc_list, -1, id);
+static int
+sched_kill_task_by_id(int id)
+{
+  node* stopped = accessNode(proc_list_low, -1, id);
+  if (stopped == NULL) stopped = accessNode(proc_list_high, -1, id);
   if (stopped != NULL) {
     kill(stopped->pid, SIGKILL);
     return id;
   }
+  printf("Error: The node with id: %d, doesn't exist!\n", id);
   return 0;
 }
 
+
 /* Create a new task.  */
-static void sched_create_task(char *executable) {
+static void
+sched_create_task(char *executable)
+{
 	pid_t pid = fork();
 	if (pid < 0) {
 		// Error code
 		perror("fork");
 	} else if (pid == 0) {
 		// Child process code
-		free(proc_list);
+		free(proc_list_low);
+    free(proc_list_high);
 		char *newargv[] = { executable, NULL, NULL, NULL };
 		char *newenviron[] = { NULL };
 		raise(SIGSTOP);
@@ -230,13 +183,27 @@ static void sched_create_task(char *executable) {
 		exit(1);
 	} else {
 		// Parent Code
-		proc_list = addNode(proc_list, pid, executable);
-		nproc++;  /* number of proccesses goes here */
+		proc_list_low = addNode(proc_list_low, pid, executable);
+		nproc++;  /* number of processes goes here */
 	}
 }
 
+static void sched_set_priority_high(int id) {
+  node* proc = accessNode(proc_list_low, -1, id);
+  proc_list_high = addNode(proc_list_high, proc->pid, proc->name);
+  proc_list_low = deleteNode(proc_list_low, -1, id);
+}
+
+static void sched_set_priority_low(int id) {
+  node* proc = accessNode(proc_list_high, -1, id);
+  proc_list_low = addNode(proc_list_low, proc->pid, proc->name);
+  proc_list_high = deleteNode(proc_list_high, -1, id);
+}
+
 /* Process requests by the shell.  */
-static int process_request(struct request_struct *rq) {
+static int
+process_request(struct request_struct *rq)
+{
 	switch (rq->request_no) {
 		case REQ_PRINT_TASKS:
 			sched_print_tasks();
@@ -248,11 +215,9 @@ static int process_request(struct request_struct *rq) {
 		case REQ_EXEC_TASK:
 			sched_create_task(rq->exec_task_arg);
 			return 0;
-
     case REQ_HIGH_TASK:
       sched_set_priority_high(rq->task_arg);
       return 0;
-
     case REQ_LOW_TASK:
       sched_set_priority_low(rq->task_arg);
       return 0;
@@ -265,18 +230,24 @@ static int process_request(struct request_struct *rq) {
 /*
  * SIGALRM handler
  */
-static void sigalrm_handler(int signum) {
-	kill(proc_list->pid, SIGSTOP);
+static void
+sigalrm_handler(int signum)
+{
+  node* list = proc_list_high;
+  if (list == NULL) list = proc_list_low;
+	kill(list->pid, SIGSTOP);
+  alarm(SCHED_TQ_SEC);
 }
 
 /*
  * SIGCHLD handler
  */
-static void sigchld_handler(int signum) {
+static void
+sigchld_handler(int signum)
+{
 	signal(SIGALRM, SIG_IGN);
   int status;
   for (;;) {
-    if (nproc <= 0) break; // If there are no child processes just exit.
     pid_t pid = waitpid(-1, &status, WUNTRACED | WNOHANG);
     if (pid < 0) {
       perror("waitpid");
@@ -284,42 +255,46 @@ static void sigchld_handler(int signum) {
     }
     if (pid == 0) break;
 
+    //explain_wait_status(pid, status);
+
     if (WIFEXITED(status) || WIFSIGNALED(status)) {
+      node* list = proc_list_high;
+      if (list == NULL) list = proc_list_low;
       /* A child has died */
+      node* stopped = accessNode(list, pid, -1);
       /* Start the next process */
-      node* stopped = accessNode(proc_list, pid, -1);
-      node* next = getNextProcess(stopped, 1);
-
-      // Change the proc_list_high pointer
-      if (!next->priority) {
-        proc_list_high = NULL;
-      } else {
-        proc_list_high = next;
-      }
-
-      if (kill(next->pid, SIGCONT) < 0) {
-        perror("kill");
-      }
-      proc_list = next;
+      kill(stopped->next->pid, SIGCONT);
+      /* Reset Alarm */
+      alarm(SCHED_TQ_SEC);
       /* Delete the killed process from the list */
-      proc_list = deleteNode(proc_list, pid, -1);
+      list = deleteNode(list, pid, -1);
+      if (proc_list_high == NULL) {
+        proc_list_low = list;
+      } else {
+        proc_list_high = list;
+      }
       nproc--;
     }
     if (WIFSTOPPED(status)) {
       /* A child has stopped due to SIGSTOP/SIGTSTP, etc... */
-      proc_list = getNextProcess(proc_list, 0);
-      if (kill(proc_list->pid, SIGCONT) < 0) {
-        perror("kill");
+      node* list = proc_list_high;
+      if (list == NULL) list = proc_list_low;
+      list = list->next;
+      kill(list->pid, SIGCONT);
+      if (proc_list_high == NULL) {
+        proc_list_low = list;
+      } else {
+        proc_list_high = list;
       }
     }
-    /* Reset Alarm */
-    alarm(SCHED_TQ_SEC);
   }
   signal(SIGALRM, sigalrm_handler);
 }
 
 /* Disable delivery of SIGALRM and SIGCHLD. */
-static void signals_disable(void) {
+static void
+signals_disable(void)
+{
 	sigset_t sigset;
 
 	sigemptyset(&sigset);
@@ -332,7 +307,9 @@ static void signals_disable(void) {
 }
 
 /* Enable delivery of SIGALRM and SIGCHLD.  */
-static void signals_enable(void) {
+static void
+signals_enable(void)
+{
 	sigset_t sigset;
 
 	sigemptyset(&sigset);
@@ -344,11 +321,14 @@ static void signals_enable(void) {
 	}
 }
 
+
 /* Install two signal handlers.
  * One for SIGCHLD, one for SIGALRM.
  * Make sure both signals are masked when one of them is running.
  */
-static void install_signal_handlers(void) {
+static void
+install_signal_handlers(void)
+{
 	sigset_t sigset;
 	struct sigaction sa;
 
@@ -380,7 +360,9 @@ static void install_signal_handlers(void) {
 	}
 }
 
-static void do_shell(char *executable, int wfd, int rfd) {
+static void
+do_shell(char *executable, int wfd, int rfd)
+{
 	char arg1[10], arg2[10];
 	char *newargv[] = { executable, NULL, NULL, NULL };
 	char *newenviron[] = { NULL };
@@ -404,7 +386,9 @@ static void do_shell(char *executable, int wfd, int rfd) {
  * two pipes are created for communication and passed
  * as command-line arguments to the executable.
  */
-static pid_t sched_create_shell(char *executable, int *request_fd, int *return_fd) {
+static pid_t
+sched_create_shell(char *executable, int *request_fd, int *return_fd)
+{
 	pid_t p;
 	int pfds_rq[2], pfds_ret[2];
 
@@ -434,7 +418,9 @@ static pid_t sched_create_shell(char *executable, int *request_fd, int *return_f
   return p;
 }
 
-static void shell_request_loop(int request_fd, int return_fd) {
+static void
+shell_request_loop(int request_fd, int return_fd)
+{
 	int ret;
 	struct request_struct rq;
 
@@ -460,13 +446,14 @@ static void shell_request_loop(int request_fd, int return_fd) {
 	}
 }
 
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[])
+{
 	/* Two file descriptors for communication with the shell */
 	static int request_fd, return_fd;
 
 	/* Create the shell. */
 	pid_t shell_pid = sched_create_shell(SHELL_EXECUTABLE_NAME, &request_fd, &return_fd);
-  proc_list = addNode(proc_list, shell_pid, SHELL_EXECUTABLE_NAME);
+  proc_list_low = addNode(proc_list_low, shell_pid, SHELL_EXECUTABLE_NAME);
 	nproc++;
 
 	/* TODO: add the shell to the scheduler's tasks */
@@ -491,7 +478,7 @@ int main(int argc, char *argv[]) {
 	/* Install SIGALRM and SIGCHLD handlers. */
 	install_signal_handlers();
 	// Start the first process and set alarm
-	kill(proc_list->pid, SIGCONT);
+	kill(proc_list_low->pid, SIGCONT);
   alarm(SCHED_TQ_SEC);
 
 
@@ -503,7 +490,7 @@ int main(int argc, char *argv[]) {
 	 while (1) {
      if (pause() == -1) {
        if (nproc == 0) {
-         printf("No processes on the list. Exiting...\n");
+         printf("No processes on the list. Exiting...");
          exit(0);
        }
      }

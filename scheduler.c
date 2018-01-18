@@ -17,7 +17,6 @@
 #define TASK_NAME_SZ 60               /* maximum size for a task's name */
 
 /* Define Linked List Structure & functions */
-
 typedef struct node {
   int id;
   pid_t pid;
@@ -26,6 +25,7 @@ typedef struct node {
   struct node* prev;
 } node;
 
+/* Allocates memory and initializes a node */
 node* newNode(int id, pid_t pid, char* name) {
   node* Node = (node*) malloc(sizeof(node));
   Node->id = id;
@@ -34,6 +34,7 @@ node* newNode(int id, pid_t pid, char* name) {
   return Node;
 }
 
+/* Adds a node to the list */
 node* addNode(node* list, int id, pid_t pid, char* name) {
   node* head = list;
   if (head == NULL) {
@@ -100,7 +101,13 @@ node* accessNode(node* list, pid_t pid) {
 node* proc_list = NULL;
 volatile int nproc = 0;
 
-static void sigalrm_handler(int signum);
+/*
+* SIGALRM handler
+*/
+static void sigalrm_handler(int signum) {
+  kill(proc_list->pid, SIGSTOP);
+}
+
 /*
 * SIGCHLD handler
 */
@@ -110,12 +117,13 @@ sigchld_handler(int signum)
   signal(SIGALRM, SIG_IGN);
   int status;
   for (;;) {
-    pid_t pid = waitpid(-1, &status, WUNTRACED | WNOHANG);
+    if (nproc <= 0) break; // If there are no child processes just exit.
+    pid_t pid = waitpid(-1, &status, WUNTRACED | WNOHANG); // If one of the children has changed status return pid
     if (pid < 0) {
       perror("waitpid");
       exit(1);
     }
-    if (pid == 0) break;
+    if (pid == 0) break; // No children have stopped
 
     explain_wait_status(pid, status);
 
@@ -123,7 +131,6 @@ sigchld_handler(int signum)
       /* A child has died */
       node* stopped = accessNode(proc_list, pid);
       kill(stopped->next->pid, SIGCONT);
-      alarm(SCHED_TQ_SEC);
       proc_list = deleteNode(proc_list, pid);
       nproc--;
       printf("Parent: Received SIGCHLD, child is dead. Exiting.\n");
@@ -134,23 +141,16 @@ sigchld_handler(int signum)
       proc_list = proc_list->next;
       kill(proc_list->pid, SIGCONT);
     }
+    /* Reset Alarm */
+    alarm(SCHED_TQ_SEC);
   }
   signal(SIGALRM, sigalrm_handler);
-}
-
-/*
-* SIGALRM handler
-*/
-static void sigalrm_handler(int signum) {
-  kill(proc_list->pid, SIGSTOP);
-  alarm(SCHED_TQ_SEC);
 }
 
 /* Install two signal handlers.
 * One for SIGCHLD, one for SIGALRM.
 * Make sure both signals are masked when one of them is running.
 */
-
 static void install_signal_handlers(void) {
   sigset_t sigset;
   struct sigaction sa;
@@ -196,7 +196,8 @@ int main(int argc, char *argv[]) {
       perror("fork");
     } else if (pid == 0) {
       // Child process code
-      free(proc_list);
+      free(proc_list);  // Delete proc_list from child so that it doesn't have access to other processes
+
       char *executable = argv[i+1];
       char *newargv[] = { executable, NULL, NULL, NULL };
       char *newenviron[] = { NULL };
@@ -232,7 +233,7 @@ int main(int argc, char *argv[]) {
   while (1) {
     if (pause() == -1) {
       if (nproc == 0) {
-        printf("No processes on the list. Exiting...");
+        printf("No processes on the list. Exiting...\n");
         exit(0);
       }
     }
