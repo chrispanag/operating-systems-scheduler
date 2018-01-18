@@ -35,6 +35,14 @@
 *.i*86
 *.x86_64
 *.hex
+scheduler-shell
+scheduler
+prog
+shell
+strace-test
+sigchld-example
+execve-example
+
 
 # Debug files
 *.dSYM/

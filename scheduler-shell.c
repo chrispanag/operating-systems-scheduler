@@ -261,62 +261,6 @@ static int process_request(struct request_struct *rq) {
 	}
 }
 
-/*
- * SIGALRM handler
- */
-static void sigalrm_handler(int signum) {
-	kill(proc_list->pid, SIGSTOP);
-}
-
-/*
- * SIGCHLD handler
- */
-static void sigchld_handler(int signum) {
-	signal(SIGALRM, SIG_IGN);
-  int status;
-  for (;;) {
-    if (nproc <= 0) break; // If there are no child processes just exit.
-    pid_t pid = waitpid(-1, &status, WUNTRACED | WNOHANG);
-    if (pid < 0) {
-      perror("waitpid");
-      exit(1);
-    }
-    if (pid == 0) break;
-
-    if (WIFEXITED(status) || WIFSIGNALED(status)) {
-      /* A child has died */
-      /* Start the next process */
-      node* stopped = accessNode(proc_list, pid, -1);
-      node* next = getNextProcess(stopped, 1);
-
-      // Change the proc_list_high pointer
-      if (!next->priority) {
-        proc_list_high = NULL;
-      } else {
-        proc_list_high = next;
-      }
-
-      if (kill(next->pid, SIGCONT) < 0) {
-        perror("kill");
-      }
-      proc_list = next;
-      /* Delete the killed process from the list */
-      proc_list = deleteNode(proc_list, pid, -1);
-      nproc--;
-    }
-    if (WIFSTOPPED(status)) {
-      /* A child has stopped due to SIGSTOP/SIGTSTP, etc... */
-      proc_list = getNextProcess(proc_list, 0);
-      if (kill(proc_list->pid, SIGCONT) < 0) {
-        perror("kill");
-      }
-    }
-    /* Reset Alarm */
-    alarm(SCHED_TQ_SEC);
-  }
-  signal(SIGALRM, sigalrm_handler);
-}
-
 /* Disable delivery of SIGALRM and SIGCHLD. */
 static void signals_disable(void) {
 	sigset_t sigset;
@@ -341,6 +285,69 @@ static void signals_enable(void) {
 		perror("signals_enable: sigprocmask");
 		exit(1);
 	}
+}
+
+/*
+ * SIGALRM handler
+ */
+static void sigalrm_handler(int signum) {
+	kill(proc_list->pid, SIGSTOP);
+}
+
+/*
+ * SIGCHLD handler
+ */
+static void sigchld_handler(int signum) {
+	signals_disable();
+  int status;
+  for (;;) {
+    if (nproc <= 0) break; // If there are no child processes just exit.
+    pid_t pid = waitpid(-1, &status, WUNTRACED | WNOHANG);
+    if (pid < 0) {
+      perror("waitpid");
+      exit(1);
+    }
+    if (pid == 0) break;
+
+    if (WIFEXITED(status) || WIFSIGNALED(status)) {
+      /* A child has died */
+      /* Start the next process */
+      node* stopped = accessNode(proc_list, pid, -1);
+      if (stopped == proc_list) {
+        node* next = getNextProcess(stopped, 1);
+
+        // Change the proc_list_high pointer
+        if (!next->priority) {
+          proc_list_high = NULL;
+        } else {
+          proc_list_high = next;
+        }
+
+        if (kill(next->pid, SIGCONT) < 0) {
+          perror("kill");
+        }
+        proc_list = next;
+        alarm(SCHED_TQ_SEC);
+      }
+      /* Delete the killed process from the list */
+      proc_list = deleteNode(proc_list, pid, -1);
+      nproc--;
+    }
+    if (WIFSTOPPED(status)) {
+      /* A child has stopped due to SIGSTOP/SIGTSTP, etc... */
+      node* stopped = accessNode(proc_list, pid, -1);
+      // Check if the child is the one running now
+      if (stopped == proc_list) {
+        proc_list = getNextProcess(proc_list, 0);
+        if (kill(proc_list->pid, SIGCONT) < 0) {
+          perror("kill");
+        }
+        /* Reset Alarm */
+        alarm(SCHED_TQ_SEC);
+      }
+    }
+  }
+  signals_enable();
 }
 
 /* Install two signal handlers.

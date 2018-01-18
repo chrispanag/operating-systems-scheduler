@@ -196,52 +196,6 @@ process_request(struct request_struct *rq)
 	}
 }
 
-/*
- * SIGALRM handler
- */
-static void
-sigalrm_handler(int signum)
-{
-	kill(proc_list->pid, SIGSTOP);
-  alarm(SCHED_TQ_SEC);
-}
-
-/*
- * SIGCHLD handler
- */
-static void sigchld_handler(int signum) {
-	signal(SIGALRM, SIG_IGN);
-  int status;
-  for (;;) {
-    pid_t pid = waitpid(-1, &status, WUNTRACED | WNOHANG);
-    if (pid < 0) {
-      perror("waitpid");
-      exit(1);
-    }
-    if (pid == 0) break;
-
-    //explain_wait_status(pid, status);
-
-    if (WIFEXITED(status) || WIFSIGNALED(status)) {
-      /* A child has died */
-      node* stopped = accessNode(proc_list, pid, -1);
-      /* Start the next process */
-      kill(stopped->next->pid, SIGCONT);
-      /* Reset Alarm */
-      alarm(SCHED_TQ_SEC);
-      /* Delete the killed process from the list */
-      proc_list = deleteNode(proc_list, pid, -1);
-      nproc--;
-    }
-    if (WIFSTOPPED(status)) {
-      /* A child has stopped due to SIGSTOP/SIGTSTP, etc... */
-      proc_list = proc_list->next;
-      kill(proc_list->pid, SIGCONT);
-    }
-  }
-  signal(SIGALRM, sigalrm_handler);
-}
-
 /* Disable delivery of SIGALRM and SIGCHLD. */
 static void
 signals_disable(void)
@@ -270,6 +224,60 @@ signals_enable(void)
 		perror("signals_enable: sigprocmask");
 		exit(1);
 	}
+}
+
+/*
+ * SIGALRM handler
+ */
+static void
+sigalrm_handler(int signum)
+{
+	kill(proc_list->pid, SIGSTOP);
+  alarm(SCHED_TQ_SEC);
+}
+
+/*
+ * SIGCHLD handler
+ */
+static void sigchld_handler(int signum) {
+  signals_disable();
+  int status;
+  for (;;) {
+    pid_t pid = waitpid(-1, &status, WUNTRACED | WNOHANG);
+    if (pid < 0) {
+      perror("waitpid");
+      exit(1);
+    }
+    if (pid == 0) break;
+
+    //explain_wait_status(pid, status);
+
+    if (WIFEXITED(status) || WIFSIGNALED(status)) {
+      /* A child has died */
+      node* stopped = accessNode(proc_list, pid, -1);
+      // Check if the child is the one running now
+      if (stopped == proc_list) {
+        kill(stopped->next->pid, SIGCONT);
+        /* Reset Alarm */
+        alarm(SCHED_TQ_SEC);
+      }
+      /* Delete the killed process from the list */
+      proc_list = deleteNode(proc_list, pid, -1);
+      nproc--;
+    }
+    if (WIFSTOPPED(status)) {
+      /* A child has stopped due to SIGSTOP/SIGTSTP, etc... */
+      node* stopped = accessNode(proc_list, pid, -1);
+      // Check if the child is the one running now
+      if (stopped == proc_list) {
+        kill(stopped->next->pid, SIGCONT);
+        proc_list = proc_list->next;
+        /* Reset Alarm */
+        alarm(SCHED_TQ_SEC);
+      }
+    }
+  }
+  signals_enable();
 }
 
 
