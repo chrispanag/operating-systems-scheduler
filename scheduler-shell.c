@@ -261,32 +261,6 @@ static int process_request(struct request_struct *rq) {
 	}
 }
 
-/* Disable delivery of SIGALRM and SIGCHLD. */
-static void signals_disable(void) {
-	sigset_t sigset;
-
-	sigemptyset(&sigset);
-	sigaddset(&sigset, SIGALRM);
-	sigaddset(&sigset, SIGCHLD);
-	if (sigprocmask(SIG_BLOCK, &sigset, NULL) < 0) {
-		perror("signals_disable: sigprocmask");
-		exit(1);
-	}
-}
-
-/* Enable delivery of SIGALRM and SIGCHLD.  */
-static void signals_enable(void) {
-	sigset_t sigset;
-
-	sigemptyset(&sigset);
-	sigaddset(&sigset, SIGALRM);
-	sigaddset(&sigset, SIGCHLD);
-	if (sigprocmask(SIG_UNBLOCK, &sigset, NULL) < 0) {
-		perror("signals_enable: sigprocmask");
-		exit(1);
-	}
-}
-
 /*
  * SIGALRM handler
  */
@@ -298,7 +272,17 @@ static void sigalrm_handler(int signum) {
  * SIGCHLD handler
  */
 static void sigchld_handler(int signum) {
-	signals_disable();
+  // Create SIGSSET
+  sigset_t sigset;
+  sigemptyset(&sigset);
+  sigaddset(&sigset, SIGALRM);
+
+  // Disable SIGALRM
+	if (sigprocmask(SIG_BLOCK, &sigset, NULL) < 0) {
+		perror("signals_disable: sigprocmask");
+		exit(1);
+	}
+
   int status;
   for (;;) {
     if (nproc <= 0) break; // If there are no child processes just exit.
@@ -347,7 +331,38 @@ static void sigchld_handler(int signum) {
       }
     }
   }
-  signals_enable();
+
+  // Enable SIGALRM
+  if (sigprocmask(SIG_UNBLOCK, &sigset, NULL) < 0) {
+		perror("signals_enable: sigprocmask");
+		exit(1);
+	}
+}
+
+/* Disable delivery of SIGALRM and SIGCHLD. */
+static void signals_disable(void) {
+	sigset_t sigset;
+
+	sigemptyset(&sigset);
+	sigaddset(&sigset, SIGALRM);
+	sigaddset(&sigset, SIGCHLD);
+	if (sigprocmask(SIG_BLOCK, &sigset, NULL) < 0) {
+		perror("signals_disable: sigprocmask");
+		exit(1);
+	}
+}
+
+/* Enable delivery of SIGALRM and SIGCHLD.  */
+static void signals_enable(void) {
+	sigset_t sigset;
+
+	sigemptyset(&sigset);
+	sigaddset(&sigset, SIGALRM);
+	sigaddset(&sigset, SIGCHLD);
+	if (sigprocmask(SIG_UNBLOCK, &sigset, NULL) < 0) {
+		perror("signals_enable: sigprocmask");
+		exit(1);
+	}
 }
 
 /* Install two signal handlers.

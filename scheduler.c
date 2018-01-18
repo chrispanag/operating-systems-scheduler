@@ -114,7 +114,17 @@ static void sigalrm_handler(int signum) {
 static void
 sigchld_handler(int signum)
 {
-  signal(SIGALRM, SIG_IGN);
+  // Create SIGSSET
+  sigset_t sigset;
+  sigemptyset(&sigset);
+  sigaddset(&sigset, SIGALRM);
+  
+  // Disable SIGALRM
+	if (sigprocmask(SIG_BLOCK, &sigset, NULL) < 0) {
+		perror("signals_disable: sigprocmask");
+		exit(1);
+	}
+
   int status;
   for (;;) {
     if (nproc <= 0) break; // If there are no child processes just exit.
@@ -153,7 +163,11 @@ sigchld_handler(int signum)
       }
     }
   }
-  signal(SIGALRM, sigalrm_handler);
+  // Enable SIGALRM
+  if (sigprocmask(SIG_UNBLOCK, &sigset, NULL) < 0) {
+		perror("signals_enable: sigprocmask");
+		exit(1);
+	}
 }
 
 /* Install two signal handlers.

@@ -196,36 +196,6 @@ process_request(struct request_struct *rq)
 	}
 }
 
-/* Disable delivery of SIGALRM and SIGCHLD. */
-static void
-signals_disable(void)
-{
-	sigset_t sigset;
-
-	sigemptyset(&sigset);
-	sigaddset(&sigset, SIGALRM);
-	sigaddset(&sigset, SIGCHLD);
-	if (sigprocmask(SIG_BLOCK, &sigset, NULL) < 0) {
-		perror("signals_disable: sigprocmask");
-		exit(1);
-	}
-}
-
-/* Enable delivery of SIGALRM and SIGCHLD.  */
-static void
-signals_enable(void)
-{
-	sigset_t sigset;
-
-	sigemptyset(&sigset);
-	sigaddset(&sigset, SIGALRM);
-	sigaddset(&sigset, SIGCHLD);
-	if (sigprocmask(SIG_UNBLOCK, &sigset, NULL) < 0) {
-		perror("signals_enable: sigprocmask");
-		exit(1);
-	}
-}
-
 /*
  * SIGALRM handler
  */
@@ -240,7 +210,11 @@ sigalrm_handler(int signum)
  * SIGCHLD handler
  */
 static void sigchld_handler(int signum) {
-  signals_disable();
+  // Create SIGSSET
+  sigset_t sigset;
+  sigemptyset(&sigset);
+  sigaddset(&sigset, SIGALRM);
+
   int status;
   for (;;) {
     pid_t pid = waitpid(-1, &status, WUNTRACED | WNOHANG);
@@ -277,7 +251,12 @@ static void sigchld_handler(int signum) {
       }
     }
   }
-  signals_enable();
+
+  // Enable SIGALRM
+  if (sigprocmask(SIG_UNBLOCK, &sigset, NULL) < 0) {
+		perror("signals_enable: sigprocmask");
+		exit(1);
+	}
 }
 
 
@@ -375,6 +354,36 @@ sched_create_shell(char *executable, int *request_fd, int *return_fd)
 	*request_fd = pfds_rq[0];
 	*return_fd = pfds_ret[1];
   return p;
+}
+
+/* Disable delivery of SIGALRM and SIGCHLD. */
+static void
+signals_disable(void)
+{
+	sigset_t sigset;
+
+	sigemptyset(&sigset);
+	sigaddset(&sigset, SIGALRM);
+	sigaddset(&sigset, SIGCHLD);
+	if (sigprocmask(SIG_BLOCK, &sigset, NULL) < 0) {
+		perror("signals_disable: sigprocmask");
+		exit(1);
+	}
+}
+
+/* Enable delivery of SIGALRM and SIGCHLD.  */
+static void
+signals_enable(void)
+{
+	sigset_t sigset;
+
+	sigemptyset(&sigset);
+	sigaddset(&sigset, SIGALRM);
+	sigaddset(&sigset, SIGCHLD);
+	if (sigprocmask(SIG_UNBLOCK, &sigset, NULL) < 0) {
+		perror("signals_enable: sigprocmask");
+		exit(1);
+	}
 }
 
 static void
