@@ -30,7 +30,7 @@ node* newNode(int id, pid_t pid, char* name) {
   node* Node = (node*) malloc(sizeof(node));
   Node->id = id;
   Node->pid = pid;
-  Node->name = name;
+  Node->name = strdup(name);
   return Node;
 }
 

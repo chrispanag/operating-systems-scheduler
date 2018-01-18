@@ -31,8 +31,7 @@ node* newNode(int id, pid_t pid, char* name) {
   Node->id = id;
   Node->pid = pid;
   // Copy name to the struct
-  Node->name = (char*) malloc(sizeof(char) * TASK_NAME_SZ);
-  strcpy(Node->name, name);
+  Node->name = strdup(name);
   return Node;
 }
 

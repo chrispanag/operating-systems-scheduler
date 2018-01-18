@@ -38,8 +38,7 @@ node* newNode(int id, pid_t pid, char* name) {
   Node->pid = pid;
   Node->priority = 0; // All processes are initiated with LOW priority.
   // Copy name to the struct
-  Node->name = (char*) malloc(sizeof(char) * TASK_NAME_SZ);
-  strcpy(Node->name, name);
+  Node->name = strdup(name);
   return Node;
 }
 
