@@ -130,7 +130,12 @@ sigchld_handler(int signum)
     if (WIFEXITED(status) || WIFSIGNALED(status)) {
       /* A child has died */
       node* stopped = accessNode(proc_list, pid);
-      kill(stopped->next->pid, SIGCONT);
+      // Check if the child is the one running now
+      if (stopped == proc_list) {
+        kill(stopped->next->pid, SIGCONT);
+        /* Reset Alarm */
+        alarm(SCHED_TQ_SEC);
+      }
       proc_list = deleteNode(proc_list, pid);
       nproc--;
       printf("Parent: Received SIGCHLD, child is dead. Exiting.\n");
@@ -138,11 +143,15 @@ sigchld_handler(int signum)
     if (WIFSTOPPED(status)) {
       /* A child has stopped due to SIGSTOP/SIGTSTP, etc... */
       printf("Parent: Child has been stopped. Moving right along...\n");
-      proc_list = proc_list->next;
-      kill(proc_list->pid, SIGCONT);
+      node* stopped = accessNode(proc_list, pid);
+      // Check if the child is the one running now
+      if (stopped == proc_list) {
+        kill(stopped->next->pid, SIGCONT);
+        proc_list = proc_list->next;
+        /* Reset Alarm */
+        alarm(SCHED_TQ_SEC);
+      }
     }
-    /* Reset Alarm */
-    alarm(SCHED_TQ_SEC);
   }
   signal(SIGALRM, sigalrm_handler);
 }

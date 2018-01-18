@@ -142,9 +142,7 @@ sched_print_tasks(void)
 /* Send SIGKILL to a task determined by the value of its
  * scheduler-specific id.
  */
-static int
-sched_kill_task_by_id(int id)
-{
+static int sched_kill_task_by_id(int id) {
   node* stopped = accessNode(proc_list, -1, id);
   if (stopped != NULL) {
     kill(stopped->pid, SIGKILL);
@@ -155,9 +153,7 @@ sched_kill_task_by_id(int id)
 
 
 /* Create a new task.  */
-static void
-sched_create_task(char *executable)
-{
+static void sched_create_task(char *executable) {
 	pid_t pid = fork();
 	if (pid < 0) {
 		// Error code
