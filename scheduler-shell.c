@@ -517,18 +517,23 @@ int main(int argc, char *argv[]) {
 
 
 	shell_request_loop(request_fd, return_fd);
-
+  nproc--;
 	/* Now that the shell is gone, just loop forever
 	 * until we exit from inside a signal handler.
 	 */
-	 while (1) {
-     if (pause() == -1) {
-       if (nproc == 0) {
-         printf("No processes on the list. Exiting...\n");
-         exit(0);
+   if (nproc > 0) {
+     while (1) {
+       if (pause() == -1) {
+         if (nproc == 0) {
+           printf("No processes on the list. Exiting...\n");
+           exit(0);
+         }
        }
      }
+   } else {
+     exit(0);
    }
+
 
 	/* Unreachable */
 	fprintf(stderr, "Internal error: Reached unreachable point\n");
